@@ -28,8 +28,8 @@ export const MODULES = [
     title: 'Module 04: Real-World Systems',
     subtitle: 'Thiết kế hệ thống thực tế triệu người dùng',
     icon: 'Globe',
-    badge: '4 Flagship Systems',
-    lessons: ['url-shortener-bitly', 'chat-system-whatsapp', 'flash-sale-shopee', 'twitter-news-feed']
+    badge: '5 Flagship Systems',
+    lessons: ['url-shortener-bitly', 'chat-system-whatsapp', 'flash-sale-shopee', 'twitter-news-feed', 'atlassian-cloud-architecture']
   }
 ];
 
@@ -392,6 +392,161 @@ export const LESSONS = {
           { from: 'redis', to: 'queue', label: 'Enqueue 100 Orders', active: true, color: '#f59e0b' },
           { from: 'queue', to: 'worker', label: 'Smooth Consume', active: true, color: '#06b6d4' },
           { from: 'worker', to: 'db', label: 'Save Order', active: true, color: '#10b981' }
+        ]
+      }
+    ]
+  },
+
+  'atlassian-cloud-architecture': {
+    id: 'atlassian-cloud-architecture',
+    moduleId: 'real-world-systems',
+    title: 'Atlassian Edge & Multi-Tenant Cloud',
+    subtitle: 'Envoy Proxy Fleet, Sovereign xDS, ASAP Auth & Open Service Broker (Vasilios Syrakis)',
+    difficulty: 'ADVANCED',
+    readTime: '18 min',
+    tags: ['Envoy Proxy', 'Sovereign xDS', 'ASAP Auth', 'Multi-Tenant', 'AWS SQS', 'Open Service Broker'],
+    steps: [
+      {
+        step: 1,
+        title: 'Global Edge: Envoy Proxy Fleet (~2,000 nodes / 13 Regions)',
+        badge: 'DATA PLANE: EDGE',
+        metrics: { regions: '13 AWS', envoyNodes: '~2,000', tls: 'Edge Terminated', overhead: '<2ms' },
+        explanation: 'Thay vì dùng Load Balancer phần cứng đắt đỏ hoặc NGINX cấu hình tĩnh, Atlassian vận hành đội hình ~2,000 Envoy Proxy trải rộng 13 AWS Regions. Envoy đảm nhận TLS termination, custom domains và định tuyến L7 tốc độ cao.',
+        whatChanged: [
+          { type: 'add', text: 'Anycast DNS / Route53 định tuyến user tới AWS Region gần nhất' },
+          { type: 'update', text: 'Envoy Edge Fleet khởi chạy ở trạng thái trắng (blank slate), sẵn sàng nhận route động' }
+        ],
+        proTip: 'Không hardcode file cấu hình lên từng proxy server. Khi chạy hàng nghìn node, việc tách biệt Data Plane (Envoy) và Control Plane là bắt buộc để tránh drift cấu hình.',
+        nodes: [
+          { id: 'client', name: 'Global Tenants', type: 'client', x: 80, y: 180, status: 'active', desc: 'Jira / Confluence Users' },
+          { id: 'dns', name: 'Route53 / CloudFront', type: 'dns', x: 240, y: 180, status: 'active', desc: '13 AWS Regions' },
+          { id: 'envoy', name: 'Envoy Edge Fleet', type: 'lb', x: 400, y: 180, status: 'busy', desc: '~2,000 Proxies (L7 + TLS)' },
+          { id: 'services', name: 'Product Microservices', type: 'app', x: 540, y: 180, status: 'idle', desc: 'Jira / Bitbucket Cluster' }
+        ],
+        traffic: [
+          { from: 'client', to: 'dns', label: 'HTTPS Custom Domain', active: true, color: '#06b6d4' },
+          { from: 'dns', to: 'envoy', label: 'Geo-Routed TLS', active: true, color: '#f59e0b' }
+        ]
+      },
+      {
+        step: 2,
+        title: 'Sovereign Control Plane & Envoy xDS Dynamic Config',
+        badge: 'CONTROL PLANE: xDS API',
+        metrics: { controlPlane: 'FastAPI', protocol: 'Envoy xDS', configSource: 'AWS S3', syncTime: '<500ms' },
+        explanation: 'Sovereign (viết bằng FastAPI) là "bộ não" của mạng Edge. Nó đọc trạng thái cấu hình từ S3, render template động và đẩy toàn bộ routes, clusters, security policies xuống hàng nghìn Envoy node qua chuẩn xDS API.',
+        whatChanged: [
+          { type: 'add', text: 'Sovereign Control Plane đồng bộ snapshot cấu hình từ S3' },
+          { type: 'add', text: 'Envoy nhận cấu hình runtime qua gRPC xDS stream không cần restart' }
+        ],
+        proTip: 'Envoy xDS API cho phép cập nhật hàng nghìn routing rule trong chưa đầy 1 giây mà không làm rớt bất kỳ kết nối TCP/HTTP nào đang mở (zero-downtime reload).',
+        nodes: [
+          { id: 's3', name: 'S3 Config Store', type: 'db', x: 180, y: 50, status: 'active', desc: 'Rendered Route Snapshots' },
+          { id: 'sovereign', name: 'Sovereign (xDS)', type: 'control-plane', x: 340, y: 50, status: 'busy', desc: 'FastAPI Control Plane' },
+          { id: 'envoy', name: 'Envoy Edge Fleet', type: 'lb', x: 340, y: 200, status: 'active', desc: '2,000 Proxies Updated' },
+          { id: 'services', name: 'Product Microservices', type: 'app', x: 520, y: 200, status: 'idle', desc: 'Upstream Clusters' }
+        ],
+        traffic: [
+          { from: 's3', to: 'sovereign', label: 'Async Poll Snapshot', active: true, color: '#06b6d4', plane: 'control' },
+          { from: 'sovereign', to: 'envoy', label: 'Push Routes (xDS gRPC)', active: true, color: '#22d3ee', plane: 'control' }
+        ]
+      },
+      {
+        step: 3,
+        title: 'ASAP Auth & Rust Security Sidecar tại lớp biên',
+        badge: 'ZERO-TRUST AUTH',
+        metrics: { authProtocol: 'ASAP (JWT)', sidecar: 'Rust Filter', centralAuthCall: '0 (Cached Keys)', verifyLatency: '0.3ms' },
+        explanation: 'Mọi request đi qua Envoy đều được kiểm tra bởi Security Sidecar (viết bằng Rust) sử dụng chuẩn ASAP (Atlassian Service Authentication Protocol) — ký JWT bất đối xứng. Proxy tự verify chữ ký bằng Public Key đã cache, loại bỏ hoàn toàn điểm nghẽn gọi Auth Server tập trung.',
+        whatChanged: [
+          { type: 'add', text: 'Rust Auth Sidecar gắn vào Envoy Filter chain' },
+          { type: 'update', text: 'Xác thực ASAP JWT token tại chỗ bằng Asymmetric Public Key' }
+        ],
+        proTip: 'Ở quy mô hàng trăm nghìn RPS, việc gọi đồng bộ tới một Auth Service trung tâm cho mỗi hop sẽ gây sập dây chuyền. Asymmetric JWT (ASAP) biến việc xác thực thành phép toán CPU cục bộ cực nhanh.',
+        nodes: [
+          { id: 'client', name: 'Tenant Request', type: 'client', x: 80, y: 180, status: 'active', desc: 'Bearer ASAP Token' },
+          { id: 'envoy', name: 'Envoy Edge Proxy', type: 'lb', x: 240, y: 180, status: 'active', desc: 'L7 Filter Chain' },
+          { id: 'asap', name: 'ASAP Rust Sidecar', type: 'auth', x: 380, y: 90, status: 'busy', desc: 'Verify JWT + Public Key' },
+          { id: 'services', name: 'Internal Services', type: 'app', x: 520, y: 180, status: 'active', desc: 'Authenticated Traffic' }
+        ],
+        traffic: [
+          { from: 'client', to: 'envoy', label: 'HTTPS + ASAP Token', active: true, color: '#06b6d4' },
+          { from: 'envoy', to: 'asap', label: 'ext_authz Check', active: true, color: '#818cf8' },
+          { from: 'envoy', to: 'services', label: 'Verified Context', active: true, color: '#10b981' }
+        ]
+      },
+      {
+        step: 4,
+        title: 'Multi-Tenant Routing & Virtual Buckets',
+        badge: 'MULTI-TENANCY',
+        metrics: { tenants: '300,000+ Orgs', routing: 'Virtual Buckets', isolation: 'Strict Context', rebalance: 'Zero Downtime' },
+        explanation: 'Request hợp lệ được trích xuất Tenant Context (org/site ID) và định tuyến qua lớp trừu tượng Virtual Buckets tới đúng Shard hoặc cụm Microservice. Cách này tránh được nhược điểm của hash(tenant_id) % N khi cần di chuyển tenant hoặc tách shard.',
+        whatChanged: [
+          { type: 'add', text: 'Ánh xạ Tenant ID -> Virtual Bucket -> Target Shard' },
+          { type: 'update', text: 'Cô lập lưu lượng giữa các tenant lớn (Enterprise) và tenant nhỏ' }
+        ],
+        proTip: 'Đừng dùng modulo hashing trực tiếp trên số lượng database shard. Hãy thêm một tầng Virtual Buckets trung gian để có thể migrate từng tenant sang shard mới mà không làm xáo trộn toàn bộ hệ thống.',
+        nodes: [
+          { id: 'envoy', name: 'Envoy Router', type: 'lb', x: 120, y: 160, status: 'active', desc: 'Extract Tenant Header' },
+          { id: 'router', name: 'Tenant Context Map', type: 'service', x: 280, y: 160, status: 'busy', desc: 'Virtual Bucket Lookup' },
+          { id: 'jira', name: 'Jira Shard A', type: 'app', x: 460, y: 80, status: 'active', desc: 'Enterprise Tenant Pool' },
+          { id: 'conf', name: 'Confluence Shard B', type: 'app', x: 460, y: 240, status: 'active', desc: 'Shared Tenant Pool' },
+          { id: 'db', name: 'Tenant DB Shards', type: 'db', x: 580, y: 160, status: 'active', desc: 'Isolated Data' }
+        ],
+        traffic: [
+          { from: 'envoy', to: 'router', label: 'tenant_id: acme-corp', active: true, color: '#f59e0b' },
+          { from: 'router', to: 'jira', label: 'Bucket #42 -> Shard A', active: true, color: '#10b981' },
+          { from: 'router', to: 'conf', label: 'Bucket #108 -> Shard B', active: true, color: '#06b6d4' },
+          { from: 'jira', to: 'db', label: 'Scoped Query', active: true, color: '#10b981' }
+        ]
+      },
+      {
+        step: 5,
+        title: 'Open Service Broker & Async SQS Provisioning',
+        badge: 'SELF-SERVICE INFRA',
+        metrics: { api: 'FastAPI OSB', queue: 'Amazon SQS', stateDb: 'DynamoDB', manualTickets: 'ZERO' },
+        explanation: 'Khi một team sản phẩm cần tạo Load Balancer, DNS hay route mới, họ gọi Open Service Broker (FastAPI). OSB đẩy tác vụ vào AWS SQS để Background Workers xử lý bất đồng bộ (tạo CloudFront, Route53, cert), lưu trạng thái vào DynamoDB và xuất snapshot lên S3 cho Sovereign.',
+        whatChanged: [
+          { type: 'add', text: 'Open Service Broker nhận API request tự cấp phát hạ tầng' },
+          { type: 'add', text: 'Amazon SQS đệm tác vụ provisioning, Workers ghi state vào DynamoDB & S3' }
+        ],
+        proTip: 'Cấp phát hạ tầng đám mây (DNS, TLS cert, CloudFront) mất vài phút. Tách việc nhận request (FastAPI) và thực thi (SQS + Workers) giúp API phản hồi tức thì và tự retry khi AWS API bị throttle.',
+        nodes: [
+          { id: 'dev', name: 'Product Team CI/CD', type: 'client', x: 80, y: 170, status: 'active', desc: 'Self-Service Request' },
+          { id: 'osb', name: 'Open Service Broker', type: 'app', x: 220, y: 170, status: 'active', desc: 'FastAPI Provisioner' },
+          { id: 'sqs', name: 'Amazon SQS', type: 'queue', x: 360, y: 170, status: 'busy', desc: 'Async Provision Queue' },
+          { id: 'worker', name: 'Infra Workers', type: 'service', x: 500, y: 170, status: 'active', desc: 'DNS / CloudFront / Certs' },
+          { id: 'dynamo', name: 'DynamoDB + S3', type: 'db', x: 500, y: 50, status: 'active', desc: 'State & Sovereign Feed' },
+          { id: 'sovereign', name: 'Sovereign (xDS)', type: 'control-plane', x: 320, y: 50, status: 'active', desc: 'Sync New Route to Edge' }
+        ],
+        traffic: [
+          { from: 'dev', to: 'osb', label: 'POST /provision-route', active: true, color: '#06b6d4' },
+          { from: 'osb', to: 'sqs', label: 'Enqueue Task', active: true, color: '#a855f7', plane: 'control' },
+          { from: 'sqs', to: 'worker', label: 'Async Consume', active: true, color: '#f59e0b', plane: 'control' },
+          { from: 'worker', to: 'dynamo', label: 'Commit State + S3', active: true, color: '#10b981', plane: 'control' },
+          { from: 'dynamo', to: 'sovereign', label: 'Trigger xDS Push', active: true, color: '#22d3ee', plane: 'control' }
+        ]
+      },
+      {
+        step: 6,
+        title: 'Multi-Region Resilience & Chaos Isolation',
+        badge: 'CHAOS & FAILOVER',
+        metrics: { blastRadius: '1 Region Isolated', failover: 'Auto DNS Drain', xdsSafety: 'Validated Snapshot', uptime: '99.99%' },
+        explanation: 'Khi một AWS Region gặp sự cố hoặc một config lỗi được đẩy lên, Sovereign giữ nguyên last-known-good snapshot trên Envoy, trong khi Route53 tự động chuyển hướng traffic sang 12 Region còn lại. SQS tiếp tục giữ các job provisioning an toàn chờ phục hồi.',
+        whatChanged: [
+          { type: 'alert', text: 'Mô phỏng sự cố 1 Region (thử bật Chaos Simulator để đánh sập node!)' },
+          { type: 'update', text: 'Envoy giữ cấu hình ổn định gần nhất; Traffic tự drain sang Region khỏe mạnh' }
+        ],
+        proTip: 'Hãy bấm nút "Chaos Simulator" ở góc trên bên phải và click vào node Envoy Region A hoặc Sovereign để xem hệ thống cô lập lỗi mà không làm sập Data Plane đang chạy!',
+        nodes: [
+          { id: 'client', name: 'Global Users', type: 'client', x: 80, y: 170, status: 'active', desc: 'Auto Failover' },
+          { id: 'envoyA', name: 'Envoy Region A (US)', type: 'lb', x: 260, y: 70, status: 'overheat', desc: 'Degraded / Draining' },
+          { id: 'envoyB', name: 'Envoy Region B (EU)', type: 'lb', x: 260, y: 250, status: 'active', desc: 'Healthy (+100% Load)' },
+          { id: 'sovereign', name: 'Sovereign Control', type: 'control-plane', x: 420, y: 70, status: 'active', desc: 'Last-Known-Good xDS' },
+          { id: 'services', name: 'Tenant Microservices', type: 'app', x: 480, y: 210, status: 'active', desc: 'Protected by ASAP' }
+        ],
+        traffic: [
+          { from: 'client', to: 'envoyB', label: 'Failover Traffic (100%)', active: true, color: '#10b981' },
+          { from: 'envoyB', to: 'services', label: 'ASAP Verified Route', active: true, color: '#06b6d4' },
+          { from: 'sovereign', to: 'envoyB', label: 'xDS Config Healthy', active: true, color: '#22d3ee', plane: 'control' }
         ]
       }
     ]

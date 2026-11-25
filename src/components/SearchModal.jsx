@@ -43,7 +43,7 @@ export default function SearchModal({ isOpen, onClose, onSelectLesson }) {
           <input
             type="text"
             autoFocus
-            placeholder="Tìm bài học, chủ đề (DNS, Redis, Sharding, Bitly, Kafka, Flash Sale...)..."
+            placeholder="Tìm bài học, chủ đề (DNS, Redis, Envoy, Atlassian, Kafka, Flash Sale...)..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="flex-1 bg-transparent border-none outline-none text-slate-100 placeholder:text-slate-500 text-sm font-sans"

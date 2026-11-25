@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Play, Pause, Sliders, Zap, Database, Server, Layers, 
-  ShieldCheck, AlertTriangle, ArrowRight, RefreshCw, Cpu
+  ShieldCheck, AlertTriangle, ArrowRight, RefreshCw, Cpu, Shield
 } from 'lucide-react';
 import IsometricCanvas from './IsometricCanvas';
 
@@ -14,13 +14,42 @@ import IsometricCanvas from './IsometricCanvas';
  */
 export default function DesignLab({ isDarkMode = true }) {
   // Trạng thái bật/tắt các thành phần kiến trúc
+  const [preset, setPreset] = useState('standard'); // 'standard' | 'atlassian'
   const [enabledComponents, setEnabledComponents] = useState({
     cdn: true,
     lb: true,
+    asapAuth: false,
+    controlPlane: false,
     cache: true,
     readReplica: false,
     kafka: false
   });
+
+  // Chuyển đổi nhanh Preset kiến trúc
+  const applyPreset = (name) => {
+    setPreset(name);
+    if (name === 'atlassian') {
+      setEnabledComponents({
+        cdn: true,
+        lb: true,
+        asapAuth: true,
+        controlPlane: true,
+        cache: true,
+        readReplica: true,
+        kafka: true
+      });
+    } else {
+      setEnabledComponents({
+        cdn: true,
+        lb: true,
+        asapAuth: false,
+        controlPlane: false,
+        cache: true,
+        readReplica: false,
+        kafka: false
+      });
+    }
+  };
 
   // Thanh trượt lưu lượng (Traffic QPS)
   const [trafficQps, setTrafficQps] = useState(25000); // 25k QPS
@@ -37,10 +66,14 @@ export default function DesignLab({ isDarkMode = true }) {
     const hasCache = enabledComponents.cache;
     const hasReplica = enabledComponents.readReplica;
     const hasKafka = enabledComponents.kafka;
+    const hasAsap = enabledComponents.asapAuth;
+    const hasControlPlane = enabledComponents.controlPlane;
 
     // Tỷ lệ request chạm tới Database
     let dbTrafficRatio = 1.0;
     if (hasCdn) dbTrafficRatio *= 0.65; // CDN giảm 35% static assets
+    if (hasAsap) dbTrafficRatio *= 0.85; // ASAP chặn traffic không hợp lệ tại Edge
+    if (hasControlPlane) dbTrafficRatio *= 0.85; // Sovereign xDS cân bằng Multi-Tenant Shard
     if (hasCache) dbTrafficRatio *= 0.12; // Cache gánh 88% read queries
     if (hasReplica) dbTrafficRatio *= 0.5; // Replica gánh 50% read load
     if (hasKafka) dbTrafficRatio *= 0.7; // Queue làm mịn đợt ghi đột biến
@@ -54,6 +87,7 @@ export default function DesignLab({ isDarkMode = true }) {
     // Tính độ trễ (Latency)
     let latency = 4; // base 4ms
     if (!hasCdn) latency += 35;
+    if (!hasAsap) latency += 18; // Central auth lookup overhead
     if (!hasCache) latency += 120;
     if (isDbOverheated) latency += 450;
     if (isDbCrashed) latency += 1200;
@@ -76,36 +110,66 @@ export default function DesignLab({ isDarkMode = true }) {
   // Dựng danh sách Nodes hiển thị trên 2.5D Canvas
   const buildNodes = () => {
     const nodes = [
-      { id: 'client', name: 'Users Fleet', type: 'client', x: 80, y: 180, status: 'active', desc: `${(trafficQps/1000).toFixed(0)}k Concurrent QPS` }
+      { id: 'client', name: 'Users Fleet', type: 'client', x: 50, y: 180, status: 'active', desc: `${(trafficQps/1000).toFixed(0)}k Concurrent QPS` }
     ];
 
-    let lastX = 240;
+    let lastX = 175;
 
     if (enabledComponents.cdn) {
       nodes.push({ id: 'cdn', name: 'Cloudflare CDN', type: 'dns', x: lastX, y: 180, status: 'active', desc: 'Edge Caching (35% absorbed)' });
-      lastX += 160;
+      lastX += 125;
     }
 
     if (enabledComponents.lb) {
-      nodes.push({ id: 'lb', name: 'Nginx Load Balancer', type: 'lb', x: lastX, y: 180, status: 'active', desc: 'L7 Round Robin' });
-      lastX += 160;
+      nodes.push({
+        id: 'lb',
+        name: enabledComponents.controlPlane ? 'Envoy Edge Fleet' : 'Nginx Load Balancer',
+        type: 'lb',
+        x: lastX,
+        y: 180,
+        status: 'active',
+        desc: enabledComponents.controlPlane ? 'xDS Dynamic L7 Routing' : 'L7 Round Robin'
+      });
+      if (enabledComponents.controlPlane) {
+        nodes.push({
+          id: 'controlPlane',
+          name: 'Sovereign (xDS)',
+          type: 'control-plane',
+          x: lastX,
+          y: 55,
+          status: 'active',
+          desc: 'FastAPI Control Plane'
+        });
+      }
+      if (enabledComponents.asapAuth) {
+        nodes.push({
+          id: 'asapAuth',
+          name: 'ASAP Rust Sidecar',
+          type: 'auth',
+          x: lastX + 60,
+          y: 280,
+          status: 'active',
+          desc: 'Local JWT Verify (0.3ms)'
+        });
+      }
+      lastX += 125;
     }
 
     nodes.push({ id: 'api', name: 'API Cluster', type: 'app', x: lastX, y: 180, status: 'active', desc: 'Auto-scaled Fleet' });
 
     if (enabledComponents.cache) {
-      nodes.push({ id: 'cache', name: 'Redis Cache', type: 'cache', x: lastX + 160, y: 80, status: 'active', desc: 'RAM (0.2ms Latency)' });
+      nodes.push({ id: 'cache', name: 'Redis Cache', type: 'cache', x: lastX + 125, y: 75, status: 'active', desc: 'RAM (0.2ms Latency)' });
     }
 
     if (enabledComponents.kafka) {
-      nodes.push({ id: 'kafka', name: 'Kafka Queue', type: 'queue', x: lastX + 160, y: 280, status: 'active', desc: 'Async Buffer' });
+      nodes.push({ id: 'kafka', name: 'Kafka Queue', type: 'queue', x: lastX + 125, y: 280, status: 'active', desc: 'Async Buffer' });
     }
 
     nodes.push({ 
       id: 'db', 
       name: 'Primary SQL DB', 
       type: 'db', 
-      x: lastX + 300, 
+      x: lastX + 225, 
       y: 180, 
       status: health.isDbCrashed ? 'dead' : (health.isDbOverheated ? 'overheat' : 'active'),
       desc: `CPU: ${health.dbCpu} (${health.directDbQps} QPS)` 
@@ -116,8 +180,8 @@ export default function DesignLab({ isDarkMode = true }) {
         id: 'replica', 
         name: 'Read Replica', 
         type: 'db', 
-        x: lastX + 300, 
-        y: 290, 
+        x: lastX + 225, 
+        y: 285, 
         status: 'active', 
         desc: 'Replication Sync' 
       });
@@ -143,7 +207,13 @@ export default function DesignLab({ isDarkMode = true }) {
     }
 
     if (hasLb) {
-      list.push({ from: prevNode, to: 'lb', label: 'Proxy', active: isRunning, color: '#f59e0b' });
+      list.push({ from: prevNode, to: 'lb', label: enabledComponents.controlPlane ? 'Envoy TLS' : 'Proxy', active: isRunning, color: '#f59e0b' });
+      if (enabledComponents.controlPlane) {
+        list.push({ from: 'controlPlane', to: 'lb', label: 'xDS Push', active: isRunning, color: '#22d3ee', plane: 'control' });
+      }
+      if (enabledComponents.asapAuth) {
+        list.push({ from: 'lb', to: 'asapAuth', label: 'ASAP Check', active: isRunning, color: '#818cf8' });
+      }
       prevNode = 'lb';
     }
 
@@ -275,18 +345,44 @@ export default function DesignLab({ isDarkMode = true }) {
             </div>
           </div>
 
-          {/* B. Modular Component Toggles */}
+          {/* B. Modular Component Toggles & Presets */}
           <div>
-            <span className="text-sm font-semibold block mb-3 text-slate-300">
-              Bật / Tắt các thành phần kiến trúc:
-            </span>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <span className="text-sm font-semibold text-slate-300">
+                Bật / Tắt các thành phần kiến trúc:
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => applyPreset('standard')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border transition ${
+                    preset === 'standard'
+                      ? 'bg-slate-700 border-slate-500 text-white'
+                      : 'bg-slate-800/40 border-slate-700/50 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Standard Web
+                </button>
+                <button
+                  onClick={() => applyPreset('atlassian')}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border transition ${
+                    preset === 'atlassian'
+                      ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300'
+                      : 'bg-slate-800/40 border-slate-700/50 text-slate-400 hover:text-cyan-300'
+                  }`}
+                >
+                  Atlassian Edge Preset
+                </button>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-2.5">
               {[
                 { key: 'cdn', name: 'CDN Edge', icon: Layers },
-                { key: 'lb', name: 'Load Balancer', icon: RefreshCw },
+                { key: 'lb', name: 'Envoy / LB', icon: RefreshCw },
+                { key: 'controlPlane', name: 'Sovereign xDS', icon: Sliders },
+                { key: 'asapAuth', name: 'ASAP Auth', icon: Shield },
                 { key: 'cache', name: 'Redis Cache', icon: Zap },
                 { key: 'readReplica', name: 'Read Replica', icon: Database },
-                { key: 'kafka', name: 'Kafka Queue', icon: Cpu }
+                { key: 'kafka', name: 'SQS / Kafka Queue', icon: Cpu }
               ].map(comp => {
                 const active = enabledComponents[comp.key];
                 const Icon = comp.icon;

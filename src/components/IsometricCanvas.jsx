@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Server, Database, HardDrive, Cpu, Shield, Globe, 
   Layers, MessageSquare, Cloud, Activity, AlertTriangle, 
-  Zap, CheckCircle2, XCircle, RotateCcw, ZoomIn, ZoomOut
+  Zap, CheckCircle2, XCircle, RotateCcw, ZoomIn, ZoomOut, Sliders
 } from 'lucide-react';
 
 /**
@@ -45,6 +45,8 @@ export default function IsometricCanvas({
       case 'db': return Database;
       case 'queue': return MessageSquare;
       case 'service': return Cpu;
+      case 'auth': return Shield;
+      case 'control-plane': return Sliders;
       default: return HardDrive;
     }
   };
@@ -103,6 +105,22 @@ export default function IsometricCanvas({
           border: '#a855f7',
           text: '#a855f7'
         };
+      case 'auth':
+        return {
+          top: isDarkMode ? '#162038' : '#e0e7ff',
+          left: isDarkMode ? '#0f1628' : '#c7d2fe',
+          right: isDarkMode ? '#0a0f1c' : '#a5b4fc',
+          border: '#6366f1',
+          text: '#818cf8'
+        };
+      case 'control-plane':
+        return {
+          top: isDarkMode ? '#0f2733' : '#cffafe',
+          left: isDarkMode ? '#0a1b24' : '#a5f3fc',
+          right: isDarkMode ? '#061218' : '#67e8f9',
+          border: '#06b6d4',
+          text: '#22d3ee'
+        };
       default:
         return {
           top: isDarkMode ? '#1a2333' : '#f1f5f9',
@@ -121,7 +139,7 @@ export default function IsometricCanvas({
         : 'bg-[#faf8f5] border-[#e2e8f0] bg-isometric-grid-light'
     }`}>
       {/* Top HUD: Real-time Metric Indicators */}
-      <div className="absolute top-4 left-4 z-20 flex flex-wrap gap-2 pointer-events-none">
+      <div className="absolute top-4 left-4 right-36 z-20 flex flex-wrap gap-2 pointer-events-none">
         {Object.entries(metrics).map(([key, val]) => (
           <div 
             key={key}
@@ -243,8 +261,8 @@ export default function IsometricCanvas({
                   d={pathD}
                   fill="none"
                   stroke={t.color || '#f59e0b'}
-                  strokeWidth="2.5"
-                  strokeDasharray="8 6"
+                  strokeWidth={t.plane === 'control' ? '2' : '2.5'}
+                  strokeDasharray={t.plane === 'control' ? '4 6' : '8 6'}
                   className="animate-flow-dash"
                   filter={t.color === '#06b6d4' ? 'url(#glow-cyan)' : 'url(#glow-amber)'}
                 />
